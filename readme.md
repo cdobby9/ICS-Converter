@@ -1,4 +1,4 @@
-# 🗓️ ICS Generator  
+# ICS Generator  
 ### Converts a prompt into an ICS file to import events into calendar using natural language processing  
 
 
@@ -6,6 +6,7 @@
 
 **ICS Generator** is a python based tool that converts plain text descriptions into `.ics` calendar events. For example saying that:  
 > "I have a chemistry exam on June 19th at 9 AM and a meeting the day after"  
+
 It will **automatically extract the details** and generate an `.ics` file to import into your calendar!  
 
 ## 🌟 Features  
@@ -14,13 +15,7 @@ It will **automatically extract the details** and generate an `.ics` file to imp
 ✅ **Exports to `.ics` format** – Easily import into Google Calendar, Apple Calendar, and Outlook.  
 ✅ **Command-line interface (CLI)** – Simple and interactive terminal usage.  
 
-## 📜 Table of Contents  
-- [Installation](#installation)  
-- [Usage](#usage)  
-- [Examples](#examples)  
-- [Configuration](#configuration)  
-- [Contributing](#contributing)  
-- [License](#license)  
+
 
 ## 🛠 Installation  
 
@@ -46,7 +41,21 @@ Run the script and input your event details:
 ```bash
 python icsGen.py
 ```
-It will prompt you to enter event details in **plain English**, process the text, and generate an ICS file!
+It will prompt you to enter your details in **normal English**, processes the text, then generates an ICS file!
+
+🔹 **Import to Google Calendar**  
+1. Open [Google Calendar](https://calendar.google.com/).  
+2. Click the ⚙️ **Settings** → **Import & Export**.  
+3. Upload your `.ics` file, and all events will be added to your calendar.  
+
+🔹 **Add to Apple Calendar (Mac & iPhone)**  
+1. Open the **Calendar** app.  
+2. Click **File → Import** and select the `.ics` file.  
+3. Events will be added instantly!  
+
+🔹 **Use in Microsoft Outlook**  
+1. Open **Outlook** and go to **File → Open & Export**.  
+2. Select **Import an iCalendar (.ics) file** and upload your file. 
 
 ## 🔥 Example  
 **Input:**  
