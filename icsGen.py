@@ -13,46 +13,7 @@ except OSError:
     print("Spacy model 'en_core_web_sm' not found. Run 'python -m spacy download en_core_web_sm' first.")
     exit()
 
-# Get local timezone once
 local_tz = get_localzone()
-
-def extract_date(text, reference_date=None):
-    """
-    Extract date from text using dateparser and regex.
-    Handles explicit and relative dates. Returns naive datetime or None.
-    """
-    try:
-        # Use reference date if provided, else current local time
-        base_date = reference_date or datetime.now(local_tz)
-        
-        parsed = dateparser.parse(
-            text,
-            settings={
-                'PREFER_DATES_FROM': 'future',
-                'RELATIVE_BASE': base_date,
-                'RETURN_AS_TIMEZONE_AWARE': False
-            }
-        )
-        
-        if parsed:
-            # Handle dateparser returning midnight as default time
-            return parsed
-        else:
-            # Fallback to regex for patterns like "19th June"
-            match = re.search(
-                r'(\d{1,2})(?:st|nd|rd|th)?\s+'
-                r'(January|February|March|April|May|June|July|August|'
-                r'September|October|November|December)',
-                text, re.IGNORECASE
-            )
-            if match:
-                day = int(match.group(1))
-                month = match.group(2)
-                year = datetime.now().year
-                return datetime.strptime(f"{day} {month} {year}", "%d %B %Y")
-    except Exception as e:
-        print(f"Error parsing date from '{text}': {str(e)}")
-    return None
 
 def assign_default_time(segment):
     """Assign default start time based on keywords in the event description."""
@@ -63,71 +24,148 @@ def assign_default_time(segment):
         return (15, 0)  # 3:00 PM
     return (12, 0)     # 12:00 PM
 
+def extract_date(text, reference_date=None):
+    """Enhanced date parser with improved relative date handling."""
+    try:
+        base_date = reference_date or datetime.now(local_tz).replace(tzinfo=None)
+        lowered = text.lower()
+        
+        # Handle relative phrases
+        if "the day after" in lowered:
+            return base_date + timedelta(days=2)
+        if "tomorrow" in lowered:
+            return base_date + timedelta(days=1)
+        if "next week" in lowered:
+            return base_date + timedelta(weeks=1)
+            
+        # Handle weekdays
+        weekday_map = {
+            'monday': 0, 'tuesday': 1, 'wednesday': 2,
+            'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
+        }
+        for day, num in weekday_map.items():
+            if day in lowered:
+                days_ahead = (num - base_date.weekday()) % 7
+                if days_ahead == 0:  # Today is the weekday
+                    days_ahead = 7
+                return base_date + timedelta(days=days_ahead)
+
+        # Extract time first
+        time_match = re.search(r'(\d{1,2})(:\d{2})?\s*(am|pm)?', text, re.IGNORECASE)
+        parsed_time = None
+        if time_match:
+            time_str = time_match.group(0)
+            parsed_time = dateparser.parse(time_str)
+
+        # Parse full date
+        parsed = dateparser.parse(
+            text,
+            settings={
+                'PREFER_DATES_FROM': 'future',
+                'RELATIVE_BASE': base_date,
+                'RETURN_AS_TIMEZONE_AWARE': False
+            }
+        )
+
+        # Combine date and time components
+        if parsed:
+            if parsed_time and parsed.time() == datetime.min.time():
+                parsed = parsed.replace(
+                    hour=parsed_time.hour,
+                    minute=parsed_time.minute
+                )
+            return parsed.replace(tzinfo=None)
+
+        # Fallback to explicit date patterns
+        date_pattern = r'''
+            (\d{1,2})(?:st|nd|rd|th)?\s+
+            (January|February|March|April|May|June|July|August|
+            September|October|November|December)
+            (?:\s+(\d{4}))?
+        '''
+        match = re.search(date_pattern, text, re.IGNORECASE | re.VERBOSE)
+        if match:
+            day, month, year = match.groups()
+            year = int(year) if year else base_date.year
+            return datetime.strptime(f"{day} {month} {year}", "%d %B %Y")
+
+    except Exception as e:
+        print(f"Date parsing error: {str(e)}")
+    return None
+
 def process_event_segment(segment, reference_date=None):
-    """
-    Process a single event segment to extract summary and datetime.
-    Returns (summary, datetime) or (None, None) on failure.
-    """
-    # Use spaCy to remove date/time entities from summary
+    """Process event segment with comprehensive cleaning."""
     doc = nlp(segment)
-    date_ents = [ent for ent in doc.ents if ent.label_ in ('DATE', 'TIME')]
     
-    # Remove date/time mentions from summary
+    # Extract and clean summary
+    date_ents = [ent for ent in doc.ents if ent.label_ in ('DATE', 'TIME')]
     summary_text = segment
     for ent in reversed(date_ents):
         summary_text = summary_text[:ent.start_char] + summary_text[ent.end_char:]
     
-    # Clean summary text
-    summary = re.sub(r'\b(?:I have|on|at)\b', '', summary_text, flags=re.IGNORECASE)
-    summary = re.sub(r'\s+', ' ', summary).strip(' ,.-').capitalize()
+    summary = re.sub(
+        r'\b(?:I have|on|at|also|don\'?t forget|and|a)\b', 
+        '', 
+        summary_text, 
+        flags=re.IGNORECASE
+    )
+    summary = re.sub(r'[,\-\.]+$', '', summary).strip().capitalize()
     if not summary:
         summary = "Scheduled Event"
 
-    # Extract and parse date
+    # Parse date/time
     parsed_datetime = extract_date(segment, reference_date)
     if not parsed_datetime:
         return None, None
 
-    return summary, parsed_datetime
+    # Apply default time if needed
+    try:
+        if parsed_datetime.time() == datetime.min.time():
+            default_hour, default_min = assign_default_time(segment)
+            parsed_datetime = parsed_datetime.replace(
+                hour=default_hour,
+                minute=default_min
+            )
+    except Exception as e:
+        print(f"⚠️ Time assignment error in '{segment}': {str(e)}")
+        return None, None
+
+    return summary, parsed_datetime.replace(tzinfo=local_tz)
 
 def text_to_ics(input_text, output_filename="generated_calendar.ics", use_utc=True):
-    """Main function to convert natural language input to ICS file."""
+    """Main conversion function with robust error handling."""
+    # Split input into segments
+    segments = re.split(r'\s*(?:,|and|\.)\s*', input_text)
+    segments = [s.strip() for s in segments if s.strip()]
+    
     events = []
-    segments = [s.strip() for s in re.split(r'\band\b|\,', input_text) if s.strip()]
-    reference_date = None  # Track dates for relative references
+    reference_date = None
 
     for seg in segments:
+        if not seg:
+            continue
+            
         summary, event_datetime = process_event_segment(seg, reference_date)
         if not event_datetime:
             print(f"⚠️ Couldn't parse date from: '{seg}'")
             continue
 
-        # Apply default time if no specific time detected
-        if event_datetime.time() == datetime.min.time():
-            default_hour, default_min = assign_default_time(seg)
-            event_datetime = event_datetime.replace(
-                hour=default_hour,
-                minute=default_min
-            )
-
-        # Handle timezone conversion
-        try:
-            if event_datetime.tzinfo is None:
-                event_datetime = event_datetime.replace(tzinfo=local_tz)
-            if use_utc:
+        # Convert to UTC if requested
+        if use_utc:
+            try:
                 event_datetime = event_datetime.astimezone(timezone.utc)
-        except Exception as e:
-            print(f"⚠️ Timezone conversion failed for '{seg}': {str(e)}")
-            continue
+            except Exception as e:
+                print(f"⚠️ Timezone conversion failed for '{seg}': {str(e)}")
+                continue
 
         events.append((summary, event_datetime))
-        reference_date = event_datetime  # Update reference for relative dates
+        reference_date = event_datetime  # Update reference date
 
     if not events:
         print("❌ No valid events found in input")
         return
 
-    # Create calendar
+    # Create and save calendar
     cal = Calendar()
     for summary, start_time in events:
         event = Event(
@@ -138,7 +176,6 @@ def text_to_ics(input_text, output_filename="generated_calendar.ics", use_utc=Tr
         )
         cal.events.add(event)
 
-    # Write to file
     try:
         with open(output_filename, 'w') as f:
             f.writelines(cal)
