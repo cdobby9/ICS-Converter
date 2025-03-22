@@ -23,7 +23,7 @@ def extract_date(text, reference_date=None):
     """
     try:
         # Use reference date if provided, else current local time
-        base_date = reference_date or local_tz.localize(datetime.now()).replace(tzinfo=None)
+        base_date = reference_date or datetime.now(local_tz)
         
         parsed = dateparser.parse(
             text,
@@ -110,10 +110,10 @@ def text_to_ics(input_text, output_filename="generated_calendar.ics", use_utc=Tr
                 minute=default_min
             )
 
-        # Localize and convert timezone
+        # Handle timezone conversion
         try:
             if event_datetime.tzinfo is None:
-                event_datetime = local_tz.localize(event_datetime)
+                event_datetime = event_datetime.replace(tzinfo=local_tz)
             if use_utc:
                 event_datetime = event_datetime.astimezone(timezone.utc)
         except Exception as e:
